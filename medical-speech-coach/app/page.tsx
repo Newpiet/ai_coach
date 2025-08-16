@@ -538,72 +538,7 @@ export default function MedicalSpeechCoach() {
                       ref={fileInputRef}
                     />
                     
-                    {/* 调试信息显示 */}
-                    <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                      <p className="text-sm text-yellow-800 mb-2">🔍 调试信息:</p>
-                      <p className="text-xs text-yellow-700">
-                        fileInputRef存在: {fileInputRef.current ? '✅ 是' : '❌ 否'}<br/>
-                        fileInputRef类型: {fileInputRef.current ? typeof fileInputRef.current : 'undefined'}<br/>
-                        fileInputRef ID: {fileInputRef.current?.id || 'N/A'}<br/>
-                        fileInputRef 类型: {fileInputRef.current?.type || 'N/A'}
-                      </p>
-                    </div>
-                    
-                    {/* 测试按钮 */}
-                    <div className="mb-4 space-y-2">
-                      <Button 
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          console.log("=== 测试按钮1被点击 ===")
-                          alert("测试按钮1工作正常！")
-                        }}
-                        className="w-full"
-                      >
-                        🧪 测试按钮1 (验证按钮点击)
-                      </Button>
-                      
-                      <Button 
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          console.log("=== 测试按钮2被点击 ===")
-                          console.log("fileInputRef.current:", fileInputRef.current)
-                          console.log("document.getElementById('video-upload'):", document.getElementById('video-upload'))
-                          console.log("所有input元素:", document.querySelectorAll('input'))
-                        }}
-                        className="w-full"
-                      >
-                        🔍 测试按钮2 (检查DOM元素)
-                      </Button>
-                      
-                      <Button 
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          console.log("=== 测试按钮3被点击 ===")
-                          if (fileInputRef.current) {
-                            console.log("尝试通过ref触发click...")
-                            fileInputRef.current.click()
-                          } else {
-                            console.log("ref不存在，尝试通过ID查找...")
-                            const input = document.getElementById('video-upload')
-                            if (input) {
-                              console.log("通过ID找到input，尝试click...")
-                              input.click()
-                            } else {
-                              console.log("通过ID也找不到input")
-                            }
-                          }
-                        }}
-                        className="w-full"
-                      >
-                        📁 测试按钮3 (手动触发文件选择)
-                      </Button>
-                    </div>
+
                     
                     <Button 
                       type="button"
@@ -654,48 +589,15 @@ export default function MedicalSpeechCoach() {
 
                     {!isUploading && !isAnalyzing && uploadedFile && (
                       <div className="space-y-3">
-                        {/* 文件大小检查 */}
-                        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                          <div className="flex items-center space-x-2 mb-2">
-                            <AlertCircle className="w-4 h-4 text-blue-600" />
-                            <span className="text-sm font-medium text-blue-800">文件大小检查</span>
-                          </div>
-                          <div className="text-sm text-blue-700">
-                            <p>当前文件: {(uploadedFile.size / (1024 * 1024)).toFixed(2)} MB</p>
-                            <p className="text-xs mt-1">
-                              {uploadedFile.size > 52 * 1024 * 1024 
-                                ? '⚠️ 文件超过52MB限制，可能影响Coze API分析效果'
-                                : '✅ 文件大小符合要求'
-                              }
-                            </p>
-                            {uploadResult?.data?.compressionAdvice && (
-                              <p className="text-xs mt-1 text-blue-600">
-                                💡 {uploadResult.data.compressionAdvice}
-                              </p>
-                            )}
-                          </div>
-                        </div>
 
-                        {!configStatus?.overall.fullyConfigured ? (
-                          <Alert>
-                            <AlertCircle className="h-4 w-4" />
-                            <AlertDescription>
-                              AI分析功能需要配置Coze API。请检查环境变量配置：
-                              <code className="block mt-2 p-2 bg-gray-100 rounded text-sm">
-                                COZE_ACCESS_TOKEN=your_token_here<br/>
-                                COZE_BOT_ID=your_bot_id_here
-                              </code>
-                            </AlertDescription>
-                          </Alert>
-                        ) : (
-                          <Button
-                            onClick={() => startAnalysis(uploadedFile.name)}
-                            className="w-full bg-green-600 hover:bg-green-700"
-                          >
-                            <BarChart3 className="w-4 h-4 mr-2" />
-                            开始AI分析
-                          </Button>
-                        )}
+
+                        <Button
+                          onClick={() => startAnalysis(uploadedFile.name)}
+                          className="w-full bg-green-600 hover:bg-green-700"
+                        >
+                          <BarChart3 className="w-4 h-4 mr-2" />
+                          开始AI分析
+                        </Button>
                       </div>
                     )}
 
@@ -757,17 +659,9 @@ export default function MedicalSpeechCoach() {
           <div className="space-y-6">
             <Card className="border-blue-200">
               <CardHeader className="bg-blue-50">
-                <CardTitle className="flex items-center justify-between text-blue-900">
-                  <span className="flex items-center space-x-2">
-                    <BarChart3 className="w-5 h-5" />
-                    <span>分析报告</span>
-                  </span>
-                  {analysisComplete && (
-                    <Button onClick={handleDownloadReport} size="sm" className="bg-blue-600 hover:bg-blue-700">
-                      <Download className="w-4 h-4 mr-2" />
-                      下载PDF
-                    </Button>
-                  )}
+                <CardTitle className="flex items-center space-x-2 text-blue-900">
+                  <BarChart3 className="w-5 h-5" />
+                  <span>分析报告</span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-6">
