@@ -379,7 +379,7 @@ export default function MedicalSpeechCoach() {
                         <p className="text-sm text-gray-500">{(uploadedFile.size / (1024 * 1024)).toFixed(2)} MB</p>
                       </div>
                       <div className="flex items-center space-x-2">
-                        {analysisComplete && <CheckCircle className="w-6 h-6 text-green-600" />}
+                        {!isUploading && uploadResult?.success && <CheckCircle className="w-6 h-6 text-green-600" />}
                         <button
                           type="button"
                           onClick={handleRemoveFile}
