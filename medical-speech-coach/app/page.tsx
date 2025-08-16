@@ -24,6 +24,11 @@ const md = new MarkdownIt({
 
 interface AnalysisReport {
   rawAnalysis?: string
+  downloadLink?: string
+  structured?: {
+    downloadLink: string
+    analysisContent: string
+  }
 }
 
 interface ConfigStatus {
@@ -308,9 +313,14 @@ export default function MedicalSpeechCoach() {
         rawAnalysisLength: analysisData.rawAnalysis?.length || 0
       })
       
-      // 创建报告对象，主要显示Coze返回的文本内容
+      // 创建报告对象，包含结构化的数据
       const reportData: AnalysisReport = {
-        rawAnalysis: analysisData.content || analysisData.rawAnalysis || "AI分析完成"
+        rawAnalysis: analysisData.content || analysisData.rawAnalysis || "AI分析完成",
+        downloadLink: analysisData.downloadLink || "",
+        structured: analysisData.structured || {
+          downloadLink: analysisData.downloadLink || "",
+          analysisContent: analysisData.content || analysisData.rawAnalysis || "AI分析完成"
+        }
       }
 
       console.log("创建的报告数据:", reportData)
@@ -440,13 +450,13 @@ export default function MedicalSpeechCoach() {
       <header className="bg-white shadow-sm border-b border-blue-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
-                <BarChart3 className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">医学演讲教练助手</h1>
-                <p className="text-sm text-gray-600">专业的医学演讲分析与改进工具</p>
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+              <BarChart3 className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">医学演讲教练助手</h1>
+              <p className="text-sm text-gray-600">专业的医学演讲分析与改进工具</p>
               </div>
             </div>
             
@@ -775,7 +785,42 @@ export default function MedicalSpeechCoach() {
                         <h3 className="text-xl font-semibold text-gray-900">AI分析报告</h3>
                       </div>
 
-                      {/* 显示Coze返回的output内容 */}
+                      {/* 显示下载链接（如果有） */}
+                      {report.downloadLink && (
+                        <div className="border border-gray-200 rounded-lg bg-white overflow-hidden mb-4">
+                          <div className="bg-gradient-to-r from-green-50 to-emerald-50 px-6 py-4 border-b border-gray-200">
+                            <h4 className="text-lg font-medium text-gray-900 flex items-center space-x-2">
+                              <Download className="w-5 h-5 text-green-600" />
+                              <span>相关文档下载</span>
+                            </h4>
+                            <p className="text-sm text-gray-600">AI分析生成的详细报告文档</p>
+                          </div>
+                          <div className="p-6">
+                            <div className="flex items-center space-x-3">
+                              <div className="flex-1">
+                                <a 
+                                  href={report.downloadLink} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:text-blue-800 underline break-all"
+                                >
+                                  {report.downloadLink}
+                                </a>
+                              </div>
+                              <Button 
+                                onClick={() => window.open(report.downloadLink, '_blank')}
+                                size="sm" 
+                                className="bg-green-600 hover:bg-green-700"
+                              >
+                                <Download className="w-4 h-4 mr-2" />
+                                下载
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 显示AI分析内容 */}
                       {report.rawAnalysis && (
                         <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
                           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-6 py-4 border-b border-gray-200">
@@ -795,9 +840,9 @@ export default function MedicalSpeechCoach() {
                                   )
                                 }}
                               />
-                    </div>
+                            </div>
                           </div>
-                      </div>
+                        </div>
                       )}
                     </div>
                   </div>

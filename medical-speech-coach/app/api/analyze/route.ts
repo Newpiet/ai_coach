@@ -13,6 +13,61 @@ interface AnalysisResponse {
   error?: string
 }
 
+// 清理和结构化AI返回内容的函数
+function cleanAndStructureContent(rawContent: string): { downloadLink: string; analysisContent: string } {
+  console.log('开始清理和结构化AI返回内容')
+  console.log('原始内容长度:', rawContent.length)
+  console.log('原始内容前500字符:', rawContent.substring(0, 500))
+  
+  // 查找"下载链接："的位置
+  const downloadLinkIndex = rawContent.indexOf('下载链接：')
+  
+  if (downloadLinkIndex === -1) {
+    console.log('未找到"下载链接："标记，返回原始内容')
+    return {
+      downloadLink: '',
+      analysisContent: rawContent
+    }
+  }
+  
+  // 提取下载链接和后面的内容
+  const contentAfterDownloadLink = rawContent.substring(downloadLinkIndex)
+  
+  // 分离下载链接和分析内容
+  const lines = contentAfterDownloadLink.split('\n')
+  let downloadLink = ''
+  let analysisContent = ''
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    
+    if (line.startsWith('下载链接：')) {
+      // 提取下载链接
+      downloadLink = line.replace('下载链接：', '').trim()
+      console.log('提取到下载链接:', downloadLink)
+      
+      // 从下一行开始收集分析内容
+      for (let j = i + 1; j < lines.length; j++) {
+        analysisContent += lines[j] + '\n'
+      }
+      break
+    }
+  }
+  
+  // 清理分析内容（去除首尾空白）
+  analysisContent = analysisContent.trim()
+  
+  console.log('结构化提取完成:')
+  console.log('- 下载链接长度:', downloadLink.length)
+  console.log('- 分析内容长度:', analysisContent.length)
+  console.log('- 分析内容前200字符:', analysisContent.substring(0, 200))
+  
+  return {
+    downloadLink,
+    analysisContent
+  }
+}
+
 // 解析SSE流式响应的函数
 function parseSSEResponse(sseData: string): string {
   console.log('开始解析SSE响应，原始数据长度:', sseData.length)
@@ -204,10 +259,18 @@ export async function POST(request: NextRequest) {
       outputContent = fullContent
     }
 
-    // 直接返回Coze的output内容，不需要复杂的JSON解析
+    // 使用新的结构化函数清理和整理内容
+    const structuredContent = cleanAndStructureContent(outputContent)
+    
+    // 返回结构化的分析结果
     const analysisResult = {
-      content: outputContent,
-      rawAnalysis: outputContent
+      content: structuredContent.analysisContent,
+      rawAnalysis: outputContent,
+      downloadLink: structuredContent.downloadLink,
+      structured: {
+        downloadLink: structuredContent.downloadLink,
+        analysisContent: structuredContent.analysisContent
+      }
     }
 
     console.log('最终返回结果:', analysisResult)
