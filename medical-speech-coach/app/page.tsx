@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Upload, FileVideo, Download, CheckCircle, AlertCircle, Clock, BarChart3, Settings } from "lucide-react"
 import MarkdownIt from 'markdown-it'
+import { removeDuplicateContent } from '@/utils/textCleanup'
 import pdfMake from 'pdfmake/build/pdfmake'
 import 'pdfmake/build/vfs_fonts'
 
@@ -180,10 +181,10 @@ export default function MedicalSpeechCoach() {
       return "请上传MP4、AVI、MOV或WMV格式的视频文件"
     }
 
-    const maxSize = 500 * 1024 * 1024 // 500MB
+    const maxSize = 52 * 1024 * 1024 // 52MB（与后端插件限制一致）
     if (file.size > maxSize) {
       console.log("文件过大:", file.size)
-      return "文件大小不能超过500MB"
+      return "文件大小不能超过52MB"
     }
 
     console.log("文件验证通过")
@@ -354,9 +355,11 @@ export default function MedicalSpeechCoach() {
       console.log('开始生成PDF报告...')
       
       // 预处理内容，确保中文正确显示
-      const cleanContent = report.rawAnalysis
-        .replace(/\\n/g, '\n')
-        .replace(/\\"/g, '"')
+      const cleanContent = removeDuplicateContent(
+        (report.rawAnalysis || '')
+          .replace(/\\n/g, '\n')
+          .replace(/\\"/g, '"')
+      )
         .replace(/#{1,3}\s*/g, '') // 移除标题标记
         .replace(/\*\*(.*?)\*\*/g, '$1') // 移除粗体标记
         .replace(/\*(.*?)\*/g, '$1') // 移除斜体标记
@@ -528,7 +531,7 @@ export default function MedicalSpeechCoach() {
                   >
                     <FileVideo className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                     <p className="text-lg font-medium text-gray-700 mb-2">拖拽视频文件到此处，或点击选择文件</p>
-                    <p className="text-sm text-gray-500 mb-4">支持 MP4、AVI、MOV、WMV 格式，最大 500MB</p>
+                    <p className="text-sm text-gray-500 mb-4">支持 MP4、AVI、MOV、WMV 格式，最大 52MB</p>
                     <input
                       type="file"
                       accept="video/*,.mp4,.avi,.mov,.wmv"
@@ -592,7 +595,14 @@ export default function MedicalSpeechCoach() {
 
 
                         <Button
-                          onClick={() => startAnalysis(uploadedFile.name)}
+                          onClick={() => {
+                            const url = uploadResult?.data?.fileUrl
+                            if (url) {
+                              startAnalysis(url)
+                            } else {
+                              setError('未找到已上传文件的URL，无法开始分析')
+                            }
+                          }}
                           className="w-full bg-green-600 hover:bg-green-700"
                         >
                           <BarChart3 className="w-4 h-4 mr-2" />
@@ -728,9 +738,11 @@ export default function MedicalSpeechCoach() {
                                 className="markdown-content"
                                 dangerouslySetInnerHTML={{
                                   __html: md.render(
-                                    report.rawAnalysis
-                                      .replace(/\\n/g, '\n')
-                                      .replace(/\\"/g, '"')
+                                    removeDuplicateContent(
+                                      (report.rawAnalysis || '')
+                                        .replace(/\\n/g, '\n')
+                                        .replace(/\\"/g, '"')
+                                    )
                                   )
                                 }}
                               />

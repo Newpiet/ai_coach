@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import axios from 'axios'
 import { COZE_CONFIG, isCozeConfigured, getConfigStatus } from '@/config/api'
+import { cleanAndStructureContent, removeDuplicateContent } from '@/utils/textCleanup'
 
 interface AnalysisRequest {
   videoUrl: string
   userId: string
+  debug?: boolean
 }
 
 interface AnalysisResponse {
@@ -13,60 +15,7 @@ interface AnalysisResponse {
   error?: string
 }
 
-// 清理和结构化AI返回内容的函数
-function cleanAndStructureContent(rawContent: string): { downloadLink: string; analysisContent: string } {
-  console.log('开始清理和结构化AI返回内容')
-  console.log('原始内容长度:', rawContent.length)
-  console.log('原始内容前500字符:', rawContent.substring(0, 500))
-  
-  // 查找"下载链接："的位置
-  const downloadLinkIndex = rawContent.indexOf('下载链接：')
-  
-  if (downloadLinkIndex === -1) {
-    console.log('未找到"下载链接："标记，返回原始内容')
-    return {
-      downloadLink: '',
-      analysisContent: rawContent
-    }
-  }
-  
-  // 提取下载链接和后面的内容
-  const contentAfterDownloadLink = rawContent.substring(downloadLinkIndex)
-  
-  // 分离下载链接和分析内容
-  const lines = contentAfterDownloadLink.split('\n')
-  let downloadLink = ''
-  let analysisContent = ''
-  
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim()
-    
-    if (line.startsWith('下载链接：')) {
-      // 提取下载链接
-      downloadLink = line.replace('下载链接：', '').trim()
-      console.log('提取到下载链接:', downloadLink)
-      
-      // 从下一行开始收集分析内容
-      for (let j = i + 1; j < lines.length; j++) {
-        analysisContent += lines[j] + '\n'
-      }
-      break
-    }
-  }
-  
-  // 清理分析内容（去除首尾空白）
-  analysisContent = analysisContent.trim()
-  
-  console.log('结构化提取完成:')
-  console.log('- 下载链接长度:', downloadLink.length)
-  console.log('- 分析内容长度:', analysisContent.length)
-  console.log('- 分析内容前200字符:', analysisContent.substring(0, 200))
-  
-  return {
-    downloadLink,
-    analysisContent
-  }
-}
+// 清理/去重逻辑改为复用 utils/textCleanup 中的方法
 
 // 解析SSE流式响应的函数
 function parseSSEResponse(sseData: string): string {
@@ -75,7 +24,8 @@ function parseSSEResponse(sseData: string): string {
   const lines = sseData.split('\n')
   console.log('SSE响应行数:', lines.length)
   
-  let fullContent = ''
+  let toolOutputContent = '' // 专门存储tool_output_content
+  let contentAccumulator = '' // 存储content字段内容
   let dataLineCount = 0
   
   for (const line of lines) {
@@ -87,18 +37,42 @@ function parseSSEResponse(sseData: string): string {
       if (data && data !== '[DONE]') {
         try {
           const parsed = JSON.parse(data)
+          
+          // 检查是否有嵌套的data字段
+          if (parsed.data && typeof parsed.data === 'string') {
+            try {
+              const nestedData = JSON.parse(parsed.data)
+              if (nestedData.tool_output_content) {
+                toolOutputContent = nestedData.tool_output_content
+                console.log('从嵌套data中找到tool_output_content，长度:', toolOutputContent.length)
+                console.log('tool_output_content前200字符:', toolOutputContent.substring(0, 200))
+                // 找到tool_output_content后，直接返回，不再处理其他内容
+                console.log('找到tool_output_content，SSE解析完成')
+                return toolOutputContent
+              }
+            } catch (nestedError) {
+              console.log('嵌套data解析失败:', nestedError)
+            }
+          }
+          
+          // 直接检查tool_output_content
+          if (parsed.tool_output_content) {
+            toolOutputContent = parsed.tool_output_content
+            console.log('找到tool_output_content，长度:', toolOutputContent.length)
+            console.log('tool_output_content前200字符:', toolOutputContent.substring(0, 200))
+            // 找到tool_output_content后，直接返回，不再处理其他内容
+            console.log('找到tool_output_content，SSE解析完成')
+            return toolOutputContent
+          }
+          
+          // 如果没有tool_output_content，检查是否有content字段
           if (parsed.content) {
-            fullContent += parsed.content
-            console.log('成功解析content字段，长度:', parsed.content.length)
-          } else {
-            console.log('该行没有content字段，完整内容:', JSON.stringify(parsed))
+            contentAccumulator += parsed.content
+            console.log('累积content字段，当前总长度:', contentAccumulator.length)
           }
+          
         } catch (e) {
-          console.log('该行不是JSON格式，直接添加内容:', data.substring(0, 100))
-          // 如果不是JSON，直接添加内容
-          if (data && !data.startsWith('{')) {
-            fullContent += data
-          }
+          console.log('该行不是JSON格式，跳过处理:', data.substring(0, 100))
         }
       } else if (data === '[DONE]') {
         console.log('收到[DONE]标记，SSE流结束')
@@ -106,10 +80,43 @@ function parseSSEResponse(sseData: string): string {
     }
   }
   
-  console.log('SSE解析完成，总内容长度:', fullContent.length)
-  console.log('前500字符:', fullContent.substring(0, 500))
+  // 如果没有找到tool_output_content，返回累积的content
+  if (contentAccumulator) {
+    console.log('未找到tool_output_content，返回累积的content，长度:', contentAccumulator.length)
+    return contentAccumulator
+  }
   
-  return fullContent
+  console.log('未找到任何内容，返回空字符串')
+  return ''
+}
+
+// 当SSE解析未能直接拿到 tool_output_content 时，从任意文本中提取（包括被转义嵌入的情况）
+function extractToolOutputCandidates(text: string): string[] {
+  if (!text) return []
+  const out: string[] = []
+  const pushDecoded = (s: string) => {
+    let v = s
+    // 多轮解转义，尽量还原
+    for (let i = 0; i < 3; i++) {
+      v = v.replace(/\\n/g, '\n').replace(/\\"/g, '"')
+    }
+    out.push(v)
+  }
+
+  try {
+    // 情况1：多层转义: tool_output_content\":\"...\"
+    const reEscaped = /tool_output_content\\\":\\\"([\s\S]*?)\\\"/g
+    for (const m of text.matchAll(reEscaped)) {
+      pushDecoded(m[1])
+    }
+    // 情况2：普通: tool_output_content":"..."
+    const rePlain = /tool_output_content\":\"([\s\S]*?)\"/g
+    for (const m of text.matchAll(rePlain)) {
+      pushDecoded(m[1])
+    }
+  } catch {}
+
+  return out
 }
 
 export async function POST(request: NextRequest) {
@@ -117,7 +124,7 @@ export async function POST(request: NextRequest) {
     console.log('=== 开始处理分析请求 ===')
     
     const body: AnalysisRequest = await request.json()
-    const { videoUrl, userId } = body
+    const { videoUrl, userId, debug } = body
 
     console.log('请求参数详情:', { 
       videoUrl, 
@@ -125,7 +132,8 @@ export async function POST(request: NextRequest) {
       videoUrlType: typeof videoUrl,
       videoUrlLength: videoUrl?.length || 0,
       hasVideoUrl: !!videoUrl,
-      videoUrlTrimmed: videoUrl?.trim() || ''
+      videoUrlTrimmed: videoUrl?.trim() || '',
+      debug: !!debug
     })
 
     if (!videoUrl) {
@@ -174,6 +182,19 @@ export async function POST(request: NextRequest) {
         console.warn('这可能会影响Coze API的分析效果')
       } else {
         console.log('视频URL可访问性检查通过')
+        const contentLengthHeader = urlCheckResponse.headers.get('content-length')
+        const sizeBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : NaN
+        if (!Number.isNaN(sizeBytes)) {
+          console.log('检测到视频大小(字节):', sizeBytes)
+          const LIMIT = 52 * 1024 * 1024
+          if (sizeBytes > LIMIT) {
+            console.log('视频超过大小限制，提前返回错误，避免调用第三方API')
+            return NextResponse.json(
+              { success: false, error: `视频大小为 ${(sizeBytes / (1024*1024)).toFixed(0)} MB，超过限制 52 MB，请压缩后重试` },
+              { status: 400 }
+            )
+          }
+        }
       }
     } catch (urlError) {
       console.warn('警告: 无法检查视频URL可访问性:', urlError)
@@ -259,17 +280,46 @@ export async function POST(request: NextRequest) {
       outputContent = fullContent
     }
 
+    // 兜底：按出现顺序提取所有 tool_output_content，优先采用第一个（流式返回的首个正文片段）
+    const candidates = [
+      ...extractToolOutputCandidates(response.data),
+      ...extractToolOutputCandidates(fullContent)
+    ]
+    if (candidates.length > 0) {
+      const first = candidates[0]
+      console.log('兜底选用第一个 tool_output_content，长度:', first.length)
+      outputContent = first
+    }
+
     // 使用新的结构化函数清理和整理内容
     const structuredContent = cleanAndStructureContent(outputContent)
+    // 对原始内容进行去噪+去重（两轮，增强强度）
+    const dedupedRaw = removeDuplicateContent(removeDuplicateContent(outputContent))
     
     // 返回结构化的分析结果
-    const analysisResult = {
+    const analysisResult: any = {
       content: structuredContent.analysisContent,
-      rawAnalysis: outputContent,
+      rawOriginal: outputContent,
+      rawAnalysis: dedupedRaw,
       downloadLink: structuredContent.downloadLink,
       structured: {
         downloadLink: structuredContent.downloadLink,
         analysisContent: structuredContent.analysisContent
+      }
+    }
+
+    if (debug) {
+      analysisResult.debug = {
+        sseFullContent: fullContent,
+        outputContent,
+        structuredContent,
+        lengths: {
+          sseFullContent: fullContent.length,
+          outputContent: outputContent.length,
+          analysisContent: structuredContent.analysisContent.length,
+          rawOriginal: outputContent.length,
+          rawAnalysis: dedupedRaw.length
+        }
       }
     }
 
