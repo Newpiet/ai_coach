@@ -10,9 +10,7 @@ const nextConfig = {
     unoptimized: true,
   },
   // 支持大文件上传
-  experimental: {
-    serverComponentsExternalPackages: [],
-  },
+  serverExternalPackages: [],
   // API路由配置
   async headers() {
     return [
