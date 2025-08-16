@@ -7,9 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
-import { Upload, FileVideo, Download, CheckCircle, AlertCircle, Clock, BarChart3, Settings } from "lucide-react"
+import { Upload, FileVideo, DownloadCloud, CheckCircle, AlertCircle, Clock, BarChart3, Trash2 } from "lucide-react"
 import MarkdownIt from 'markdown-it'
 import { removeDuplicateContent } from '@/utils/textCleanup'
 import pdfMake from 'pdfmake/build/pdfmake'
@@ -22,6 +20,12 @@ const md = new MarkdownIt({
   linkify: true,
   typographer: true
 })
+
+// 统一清理URL尾部多余的斜杠或反斜杠
+const sanitizeUrl = (url?: string): string => {
+  if (!url) return ""
+  return url.trim().replace(/[\\\/]+$/, '')
+}
 
 interface AnalysisReport {
   rawAnalysis?: string
@@ -91,10 +95,8 @@ export default function MedicalSpeechCoach() {
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true)
-    } else if (e.type === "dragleave") {
-      setDragActive(false)
+    if (e.type === "dragenter" || e.type === "dragleave" || e.type === "dragover") {
+      setDragActive(e.type !== "dragleave")
     }
   }, [])
 
@@ -121,44 +123,44 @@ export default function MedicalSpeechCoach() {
     }
   }, [])
 
+  // 移除当前已上传文件，便于重新选择/多次使用
+  const handleRemoveFile = useCallback(() => {
+    setUploadedFile(null)
+    setUploadResult(null)
+    setReport(null)
+    setIsAnalyzing(false)
+    setAnalysisComplete(false)
+    setError(null)
+    setUploadProgress(0)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }, [])
+
   // 使用useCallback来确保函数引用稳定
   const triggerFileSelect = useCallback(() => {
-    console.log("=== 触发文件选择 ===")
-    console.log("fileInputRef.current:", fileInputRef.current)
-    
     if (fileInputRef.current) {
-      console.log("使用ref触发文件选择")
       fileInputRef.current.click()
     } else {
-      console.log("ref不存在，创建临时input")
       const tempInput = document.createElement('input')
       tempInput.type = 'file'
       tempInput.accept = 'video/*,.mp4,.avi,.mov,.wmv'
       tempInput.style.display = 'none'
-      
       tempInput.onchange = (event) => {
         const target = event.target as HTMLInputElement
         if (target.files && target.files[0]) {
-          console.log("✅ 临时input选择了文件:", target.files[0])
           handleFileUpload(target.files[0])
         }
       }
-      
       document.body.appendChild(tempInput)
       tempInput.click()
-      
       setTimeout(() => {
-        if (document.body.contains(tempInput)) {
-          document.body.removeChild(tempInput)
-        }
+        if (document.body.contains(tempInput)) document.body.removeChild(tempInput)
       }, 2000)
     }
   }, [])
 
   const validateFile = (file: File): string | null => {
-    console.log("验证文件:", file.name, file.type, file.size)
-    
-    // 更宽松的文件类型验证
     const allowedTypes = [
       "video/mp4", 
       "video/avi", 
@@ -168,32 +170,16 @@ export default function MedicalSpeechCoach() {
       "video/x-msvideo",
       "video/x-ms-wmv"
     ]
-    
-    // 检查文件扩展名作为备用验证
     const fileName = file.name.toLowerCase()
-    const hasValidExtension = fileName.endsWith('.mp4') || 
-                             fileName.endsWith('.avi') || 
-                             fileName.endsWith('.mov') || 
-                             fileName.endsWith('.wmv')
-
-    if (!allowedTypes.includes(file.type) && !hasValidExtension) {
-      console.log("文件类型不匹配:", file.type)
-      return "请上传MP4、AVI、MOV或WMV格式的视频文件"
-    }
+    const hasValidExtension = fileName.endsWith('.mp4') || fileName.endsWith('.avi') || fileName.endsWith('.mov') || fileName.endsWith('.wmv')
+    if (!allowedTypes.includes(file.type) && !hasValidExtension) return "请上传MP4、AVI、MOV或WMV格式的视频文件"
 
     const maxSize = 52 * 1024 * 1024 // 52MB（与后端插件限制一致）
-    if (file.size > maxSize) {
-      console.log("文件过大:", file.size)
-      return "文件大小不能超过52MB"
-    }
-
-    console.log("文件验证通过")
+    if (file.size > maxSize) return "文件大小不能超过52MB"
     return null
   }
 
   const handleFileUpload = async (file: File) => {
-    console.log("开始处理文件上传:", file.name)
-    
     const validationError = validateFile(file)
     if (validationError) {
       setError(validationError)
@@ -204,54 +190,27 @@ export default function MedicalSpeechCoach() {
     setUploadedFile(file)
     setIsUploading(true)
     setUploadProgress(0)
+    // 重置分析相关状态，确保每次上传后由用户点击按钮再开始分析
+    setIsAnalyzing(false)
+    setAnalysisComplete(false)
+    setReport(null)
+    setUploadResult(null)
 
     try {
-      // 创建FormData对象
       const formData = new FormData()
       formData.append('file', file)
-
-      console.log("发送文件到上传API...")
-      
-      // 调用上传API
-      const uploadResponse = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData
-      })
-
-      if (!uploadResponse.ok) {
-        throw new Error('文件上传失败')
-      }
+      const uploadResponse = await fetch('/api/upload', { method: 'POST', body: formData })
+      if (!uploadResponse.ok) throw new Error('文件上传失败')
 
       const uploadResult = await uploadResponse.json()
-      console.log("上传成功:", uploadResult)
-      setUploadResult(uploadResult); // 更新上传结果状态
-
-      if (!uploadResult.success) {
-        throw new Error(uploadResult.error || '文件上传失败')
-      }
-
-      // 检查上传结果中的文件URL
-      console.log("上传结果详情:", {
-        success: uploadResult.success,
-        fileName: uploadResult.data?.fileName,
-        originalName: uploadResult.data?.originalName,
-        fileSize: uploadResult.data?.fileSize,
-        fileUrl: uploadResult.data?.fileUrl
-      })
-
-      if (!uploadResult.data?.fileUrl) {
-        throw new Error('文件上传成功但未返回文件URL')
-      }
+      setUploadResult(uploadResult)
+      if (!uploadResult.success) throw new Error(uploadResult.error || '文件上传失败')
+      if (!uploadResult.data?.fileUrl) throw new Error('文件上传成功但未返回文件URL')
 
       setUploadProgress(100)
       setIsUploading(false)
-
-      // 开始分析，传递文件URL
-      console.log("准备开始分析，文件URL:", uploadResult.data.fileUrl)
-      await startAnalysis(uploadResult.data.fileUrl)
-
+      console.log("上传完成，等待用户点击‘开始AI分析’按钮。文件URL:", uploadResult.data.fileUrl)
     } catch (error: unknown) {
-      console.error("文件上传失败:", error)
       setError(error instanceof Error ? error.message : '文件上传失败')
       setIsUploading(false)
       setUploadProgress(0)
@@ -259,190 +218,76 @@ export default function MedicalSpeechCoach() {
   }
 
   const startAnalysis = async (videoUrl: string) => {
-    console.log("=== 开始分析视频 ===")
-    console.log("接收到的视频URL:", videoUrl)
-    console.log("URL类型:", typeof videoUrl)
-    console.log("URL长度:", videoUrl.length)
-    
     if (!videoUrl || videoUrl.trim() === '') {
-      console.error("错误: 视频URL为空或无效")
       setError('视频URL无效，无法开始分析')
       return
     }
-    
     setIsAnalyzing(true)
     setError(null)
 
     try {
-      const requestBody = {
-        videoUrl: videoUrl,
-        userId: 'user_' + Date.now()
-      }
-      
-      console.log("发送到分析API的请求体:", requestBody)
-      
+      const requestBody = { videoUrl: videoUrl, userId: 'user_' + Date.now() }
       const analysisResponse = await fetch('/api/analyze', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody)
       })
-
-      console.log("分析API响应状态:", analysisResponse.status)
-      console.log("分析API响应头:", Object.fromEntries(analysisResponse.headers.entries()))
-
-      if (!analysisResponse.ok) {
-        const errorText = await analysisResponse.text()
-        console.error("分析API错误响应:", errorText)
-        throw new Error(`分析请求失败: ${analysisResponse.status} - ${errorText}`)
-      }
+      if (!analysisResponse.ok) throw new Error(`分析请求失败: ${analysisResponse.status} - ${await analysisResponse.text()}`)
 
       const analysisResult = await analysisResponse.json()
-      console.log("分析结果:", analysisResult)
+      if (!analysisResult.success) throw new Error(analysisResult.error || '分析失败')
 
-      if (!analysisResult.success) {
-        throw new Error(analysisResult.error || '分析失败')
-      }
-
-      // 处理分析结果
       const analysisData = analysisResult.data
-      console.log("分析数据详情:", {
-        hasContent: !!analysisData.content,
-        hasRawAnalysis: !!analysisData.rawAnalysis,
-        contentLength: analysisData.content?.length || 0,
-        rawAnalysisLength: analysisData.rawAnalysis?.length || 0
-      })
-      
-      // 创建报告对象，包含结构化的数据
+      const cleanedDownloadLink = sanitizeUrl(analysisData.downloadLink)
+      const cleanedStructuredDownloadLink = sanitizeUrl(analysisData.structured?.downloadLink)
       const reportData: AnalysisReport = {
         rawAnalysis: analysisData.content || analysisData.rawAnalysis || "AI分析完成",
-        downloadLink: analysisData.downloadLink || "",
-        structured: analysisData.structured || {
-          downloadLink: analysisData.downloadLink || "",
+        downloadLink: cleanedDownloadLink,
+        structured: analysisData.structured ? {
+          downloadLink: cleanedStructuredDownloadLink,
+          analysisContent: analysisData.structured.analysisContent || analysisData.content || analysisData.rawAnalysis || "AI分析完成"
+        } : {
+          downloadLink: cleanedDownloadLink,
           analysisContent: analysisData.content || analysisData.rawAnalysis || "AI分析完成"
         }
       }
-
-      console.log("创建的报告数据:", reportData)
       setReport(reportData)
       setAnalysisComplete(true)
       setIsAnalyzing(false)
-
     } catch (error: unknown) {
-      console.error("分析失败:", error)
       setError(error instanceof Error ? error.message : '分析失败')
       setIsAnalyzing(false)
-      
-      // 如果API调用失败，使用模拟数据作为备用
-      console.log("使用模拟数据作为备用")
-      const mockReport: AnalysisReport = {
-        rawAnalysis: "AI分析完成"
-      }
-
+      const mockReport: AnalysisReport = { rawAnalysis: "AI分析完成" }
       setReport(mockReport)
       setAnalysisComplete(true)
     }
   }
 
   const handleDownloadReport = async () => {
-    if (!report || !report.rawAnalysis) {
-      console.error('没有可下载的报告内容')
-      return
-    }
-
+    if (!report || !report.rawAnalysis) return
     try {
-      console.log('开始生成PDF报告...')
-      
-      // 预处理内容，确保中文正确显示
       const cleanContent = removeDuplicateContent(
-        (report.rawAnalysis || '')
-          .replace(/\\n/g, '\n')
-          .replace(/\\"/g, '"')
-      )
-        .replace(/#{1,3}\s*/g, '') // 移除标题标记
-        .replace(/\*\*(.*?)\*\*/g, '$1') // 移除粗体标记
-        .replace(/\*(.*?)\*/g, '$1') // 移除斜体标记
-        .replace(/- /g, '• ') // 将列表标记转换为项目符号
+        (report.rawAnalysis || '').replace(/\\n/g, '\n').replace(/\\"/g, '"')
+      ).replace(/#{1,3}\s*/g, '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1').replace(/- /g, '• ')
 
       const docDefinition: any = {
         content: [
-          {
-            text: 'Medical Speech AI Analysis Report',
-            style: 'header',
-            alignment: 'center',
-            margin: [0, 0, 0, 20]
-          },
-          {
-            text: '医学演讲AI分析报告',
-            style: 'subheader',
-            alignment: 'center',
-            margin: [0, 0, 0, 10]
-          },
-          {
-            text: `Generated: ${new Date().toLocaleString('zh-CN', {
-              year: 'numeric',
-              month: '2-digit',
-              day: '2-digit',
-              hour: '2-digit',
-              minute: '2-digit'
-            })}`,
-            style: 'footer',
-            alignment: 'center',
-            margin: [0, 0, 0, 20]
-          },
-          {
-            text: 'AI分析报告',
-            style: 'sectionTitle',
-            margin: [0, 0, 0, 15]
-          },
-          {
-            text: cleanContent,
-            style: 'content',
-            margin: [0, 0, 0, 10]
-          }
+          { text: 'Medical Speech AI Analysis Report', style: 'header', alignment: 'center', margin: [0, 0, 0, 20] },
+          { text: '医学演讲AI分析报告', style: 'subheader', alignment: 'center', margin: [0, 0, 0, 10] },
+          { text: `Generated: ${new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`, style: 'footer', alignment: 'center', margin: [0, 0, 0, 20] },
+          { text: 'AI分析报告', style: 'sectionTitle', margin: [0, 0, 0, 15] },
+          { text: cleanContent, style: 'content', margin: [0, 0, 0, 10] }
         ],
         styles: {
-          header: {
-            fontSize: 24,
-            color: '#4162FF', // 蓝色
-            bold: true,
-            margin: [0, 0, 0, 20]
-          },
-          subheader: {
-            fontSize: 16,
-            color: '#646464',
-            bold: true,
-            margin: [0, 0, 0, 10]
-          },
-          footer: {
-            fontSize: 12,
-            color: '#646464',
-            margin: [0, 0, 0, 10]
-          },
-          sectionTitle: {
-            fontSize: 18,
-            color: '#333333',
-            bold: true,
-            margin: [0, 0, 0, 10]
-          },
-          content: {
-            fontSize: 12,
-            color: '#4B4B4B',
-            lineHeight: 1.5,
-            margin: [0, 0, 0, 10]
-          }
+          header: { fontSize: 24, color: '#4162FF', bold: true, margin: [0, 0, 0, 20] },
+          subheader: { fontSize: 16, color: '#646464', bold: true, margin: [0, 0, 0, 10] },
+          footer: { fontSize: 12, color: '#646464', margin: [0, 0, 0, 10] },
+          sectionTitle: { fontSize: 18, color: '#333333', bold: true, margin: [0, 0, 0, 10] },
+          content: { fontSize: 12, color: '#4B4B4B', lineHeight: 1.5, margin: [0, 0, 0, 10] }
         }
       }
-
       pdfMake.createPdf(docDefinition).download(`Medical_Speech_AI_Report_${new Date().toISOString().slice(0, 10)}.pdf`)
-      
-      console.log('PDF报告生成成功')
-      
     } catch (error: unknown) {
-      console.error('PDF生成失败:', error)
-      console.error('错误详情:', error instanceof Error ? error.message : '未知错误')
-      console.error('错误堆栈:', error instanceof Error ? error.stack : '无堆栈信息')
       alert(`PDF生成失败: ${error instanceof Error ? error.message : '未知错误'}`)
     }
   }
@@ -451,7 +296,7 @@ export default function MedicalSpeechCoach() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       {/* Header */}
       <header className="bg-white shadow-sm border-b border-blue-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div className="max-w-7xl mx-auto pl-4 sm:pl-6 lg:pl-8 pr-0 py-4">
           <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
@@ -463,29 +308,8 @@ export default function MedicalSpeechCoach() {
               </div>
             </div>
             
-            {/* 右侧功能区域 */}
-            <div className="flex items-center space-x-4">
-              {/* 配置状态显示 */}
-              {configStatus && (
-                <div className="flex items-center space-x-2">
-                  <Settings className="w-4 h-4 text-gray-500" />
-                  <div className="flex items-center space-x-2">
-                    <Badge 
-                      variant={configStatus.overall.fullyConfigured ? "default" : "destructive"}
-                      className="text-xs"
-                    >
-                      {configStatus.overall.fullyConfigured ? "API已配置" : "API未配置"}
-                    </Badge>
-                    {!configStatus.overall.fullyConfigured && (
-                      <span className="text-xs text-gray-500">
-                        请检查环境变量配置
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-              
-              {/* 个性化信息 */}
+            {/* 右侧仅保留用户信息 */}
+            <div className="flex items-center justify-end">
               <div className="flex items-center space-x-3">
                 <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
                   <span className="text-sm font-medium text-gray-600">U</span>
@@ -495,12 +319,6 @@ export default function MedicalSpeechCoach() {
                   <p className="text-xs text-gray-500">医学演讲教练</p>
                 </div>
               </div>
-              
-              {/* 设置按钮 */}
-              <Button variant="ghost" size="sm" className="text-gray-500 hover:text-gray-700">
-                <Settings className="w-4 h-4" />
-                <span className="ml-2 hidden sm:inline">设置</span>
-              </Button>
             </div>
           </div>
         </div>
@@ -540,22 +358,12 @@ export default function MedicalSpeechCoach() {
                       id="video-upload"
                       ref={fileInputRef}
                     />
-                    
-
-                    
                     <Button 
                       type="button"
                       className="bg-blue-600 hover:bg-blue-700 w-full"
                       onClick={(e) => {
                         e.preventDefault()
                         e.stopPropagation()
-                        console.log("=== 主文件选择按钮被点击 ===")
-                        console.log("事件对象:", e)
-                        console.log("事件类型:", e.type)
-                        console.log("目标元素:", e.target)
-                        console.log("当前目标:", e.currentTarget)
-                        
-                        // 调用我们的触发函数
                         triggerFileSelect()
                       }}
                     >
@@ -570,7 +378,18 @@ export default function MedicalSpeechCoach() {
                         <p className="font-medium text-gray-900">{uploadedFile.name}</p>
                         <p className="text-sm text-gray-500">{(uploadedFile.size / (1024 * 1024)).toFixed(2)} MB</p>
                       </div>
-                      {analysisComplete && <CheckCircle className="w-6 h-6 text-green-600" />}
+                      <div className="flex items-center space-x-2">
+                        {analysisComplete && <CheckCircle className="w-6 h-6 text-green-600" />}
+                        <button
+                          type="button"
+                          onClick={handleRemoveFile}
+                          className="p-2 rounded hover:bg-red-50 text-gray-500 hover:text-red-600"
+                          aria-label="删除并重新选择文件"
+                          title="删除并重新选择文件"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
                     </div>
 
                     {isUploading && (
@@ -590,10 +409,8 @@ export default function MedicalSpeechCoach() {
                       </Alert>
                     )}
 
-                    {!isUploading && !isAnalyzing && uploadedFile && (
+                    {!isUploading && !isAnalyzing && uploadedFile && uploadResult?.success && uploadResult?.data?.fileUrl && (
                       <div className="space-y-3">
-
-
                         <Button
                           onClick={() => {
                             const url = uploadResult?.data?.fileUrl
@@ -634,30 +451,27 @@ export default function MedicalSpeechCoach() {
               <CardHeader className="bg-blue-50">
                 <CardTitle className="text-blue-900">使用说明</CardTitle>
               </CardHeader>
-              <CardContent className="p-6">
-                <div className="space-y-3 text-sm text-gray-600">
+              <CardContent className="p-6 relative overflow-hidden rounded-b-lg">
+                <div
+                  className="absolute inset-0 bg-cover bg-center opacity-20 pointer-events-none"
+                  style={{ backgroundImage: "url('/placeholder.jpg')" }}
+                />
+                <div className="absolute inset-0 bg-gradient-to-br from-white/85 via-white/75 to-blue-50/60 pointer-events-none" />
+                <div className="relative space-y-3 text-sm text-gray-700">
                   <div className="flex items-start space-x-2">
-                    <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-medium mt-0.5">
-                      1
-                    </span>
+                    <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-medium mt-0.5">1</span>
                     <p>上传您的医学演讲视频（5-30分钟）</p>
                   </div>
                   <div className="flex items-start space-x-2">
-                    <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-medium mt-0.5">
-                      2
-                    </span>
+                    <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-medium mt-0.5">2</span>
                     <p>等待AI分析您的演讲表现</p>
                   </div>
                   <div className="flex items-start space-x-2">
-                    <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-medium mt-0.5">
-                      3
-                    </span>
+                    <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-medium mt-0.5">3</span>
                     <p>查看详细的分析报告和改进建议</p>
                   </div>
                   <div className="flex items-start space-x-2">
-                    <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-medium mt-0.5">
-                      4
-                    </span>
+                    <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-medium mt-0.5">4</span>
                     <p>下载PDF报告用于后续参考</p>
                   </div>
                 </div>
@@ -677,75 +491,63 @@ export default function MedicalSpeechCoach() {
               <CardContent className="p-6">
                 {!report ? (
                   <div className="text-center py-12">
-                    <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500">上传视频后，AI分析报告将在此显示</p>
+                    {isAnalyzing ? (
+                      <div>
+                        <div className="relative w-20 h-20 mx-auto mb-6">
+                          <span className="absolute inset-0 rounded-full bg-blue-400/20 blur-md animate-ping"></span>
+                          <span className="absolute inset-0 rounded-full ring-2 ring-blue-300/40 animate-pulse"></span>
+                          <BarChart3 className="relative w-20 h-20 text-blue-600 animate-bounce" />
+                        </div>
+                        <p className="text-blue-600">AI正在生成报告，请稍候...</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                        <p className="text-gray-500">上传视频后，AI分析报告将在此显示</p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-6">
-                    {/* AI分析报告 */}
+                    {/* AI分析报告内容 */}
                     <div className="space-y-4">
-                      <div className="flex items-center space-x-2 mb-4">
-                        <BarChart3 className="w-5 h-5 text-blue-600" />
-                        <h3 className="text-xl font-semibold text-gray-900">AI分析报告</h3>
-                      </div>
-
-                      {/* 显示下载链接（如果有） */}
-                      {report.downloadLink && (
-                        <div className="border border-gray-200 rounded-lg bg-white overflow-hidden mb-4">
-                          <div className="bg-gradient-to-r from-green-50 to-emerald-50 px-6 py-4 border-b border-gray-200">
-                            <h4 className="text-lg font-medium text-gray-900 flex items-center space-x-2">
-                              <Download className="w-5 h-5 text-green-600" />
-                              <span>相关文档下载</span>
-                            </h4>
-                            <p className="text-sm text-gray-600">AI分析生成的详细报告文档</p>
-                          </div>
-                          <div className="p-6">
-                            <div className="flex items-center space-x-3">
-                              <div className="flex-1">
-                                <a 
-                                  href={report.downloadLink} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 hover:text-blue-800 underline break-all"
-                                >
-                                  {report.downloadLink}
-                                </a>
-                              </div>
-                              <Button 
-                                onClick={() => window.open(report.downloadLink, '_blank')}
-                                size="sm" 
-                                className="bg-green-600 hover:bg-green-700"
-                              >
-                                <Download className="w-4 h-4 mr-2" />
-                                下载
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
                       {/* 显示AI分析内容 */}
                       {report.rawAnalysis && (
-                        <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+                        <div className="relative border border-gray-200 rounded-lg bg-white overflow-hidden">
+                          {(report.structured?.downloadLink || report.downloadLink) && (
+                            <div className="absolute top-3 right-3 z-10 flex flex-col items-center">
+                              <Button
+                                onClick={() => window.open(report.structured?.downloadLink || report.downloadLink || '', '_blank')}
+                                className="bg-green-600 hover:bg-green-700 text-white shadow-lg ring-2 ring-green-300/60 rounded-full p-4 animate-pulse hover:animate-none transition-transform hover:scale-105"
+                                aria-label="下载AI分析文档"
+                                title="下载AI分析文档"
+                              >
+                                <DownloadCloud className="w-7 h-7" />
+                              </Button>
+                              <span className="mt-1 text-[11px] leading-none text-green-700 bg-white/80 backdrop-blur-sm px-2 py-0.5 rounded shadow-sm">下载报告</span>
+                            </div>
+                          )}
                           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-6 py-4 border-b border-gray-200">
                             <h4 className="text-lg font-medium text-gray-900">医学演讲专业分析</h4>
                             <p className="text-sm text-gray-600">基于AI深度分析的详细报告</p>
                           </div>
                           <div className="p-6">
-                            <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
-                              {/* 使用markdown-it渲染markdown格式的内容 */}
-                              <div 
-                                className="markdown-content"
-                                dangerouslySetInnerHTML={{
-                                  __html: md.render(
-                                    removeDuplicateContent(
-                                      (report.rawAnalysis || '')
-                                        .replace(/\\n/g, '\n')
-                                        .replace(/\\"/g, '"')
+                            <div className="max-h-[60vh] overflow-y-auto pr-2">
+                              <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
+                                {/* 使用markdown-it渲染markdown格式的内容 */}
+                                <div 
+                                  className="markdown-content"
+                                  dangerouslySetInnerHTML={{
+                                    __html: md.render(
+                                      removeDuplicateContent(
+                                        (report.rawAnalysis || '')
+                                          .replace(/\\n/g, '\n')
+                                          .replace(/\\"/g, '"')
+                                      )
                                     )
-                                  )
-                                }}
-                              />
+                                  }}
+                                />
+                              </div>
                             </div>
                           </div>
                         </div>
